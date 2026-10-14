@@ -1,0 +1,271 @@
+services:
+  postgres_movies:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10", "-c", "wal_keep_size=256MB", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    environment:
+      POSTGRES_DB: ${MOVIE_DB_NAME:-netflix_movies}
+      POSTGRES_USER: ${MOVIE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+    volumes:
+      - movies_db_data:/var/lib/postgresql/data
+      - ./postgres_movies_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    ports:
+      - "127.0.0.1:${MOVIE_DB_HOST_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MOVIE_DB_USER:-postgres} -d ${MOVIE_DB_NAME:-netflix_movies}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks: [netflix_net]
+
+  postgres_movies_replication_setup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/scripts/grant_replication.sh"]
+    environment:
+      POSTGRES_DB: ${MOVIE_DB_NAME:-netflix_movies}
+      POSTGRES_USER: ${MOVIE_DB_USER:-postgres}
+      PGPASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+      PRIMARY_HOST: postgres_movies
+      REPLICATION_USER: ${MOVIE_DB_REPLICATION_USER:-netflix_movies_replicator}
+      REPLICATION_PASSWORD: ${MOVIE_DB_REPLICATION_PASSWORD:-${MOVIE_DB_PASSWORD:-postgres}}
+    volumes:
+      - ./docker/grant_replication.sh:/scripts/grant_replication.sh:ro
+    depends_on:
+      postgres_movies: {condition: service_healthy}
+    networks: [netflix_net]
+
+  postgres_movies_replica:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/docker/postgres_replica_entrypoint.sh"]
+    environment:
+      POSTGRES_DB: ${MOVIE_DB_NAME:-netflix_movies}
+      POSTGRES_USER: ${MOVIE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+      PRIMARY_HOST: postgres_movies
+      REPLICATION_USER: ${MOVIE_DB_REPLICATION_USER:-netflix_movies_replicator}
+      REPLICATION_PASSWORD: ${MOVIE_DB_REPLICATION_PASSWORD:-${MOVIE_DB_PASSWORD:-postgres}}
+    volumes:
+      - movies_replica_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres_replica_entrypoint.sh:/docker/postgres_replica_entrypoint.sh:ro
+    ports: ["127.0.0.1:${MOVIE_DB_REPLICA_HOST_PORT:-5444}:5432"]
+    depends_on:
+      postgres_movies_replication_setup: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MOVIE_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    networks: [netflix_net]
+
+  postgres_sessions:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10", "-c", "wal_keep_size=256MB", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    environment:
+      POSTGRES_DB: ${SESSION_DB_NAME:-netflix_sessions}
+      POSTGRES_USER: ${SESSION_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${SESSION_DB_PASSWORD:-postgres}
+    volumes:
+      - sessions_db_data:/var/lib/postgresql/data
+      - ./postgres_sessions_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    ports:
+      - "127.0.0.1:${SESSION_DB_HOST_PORT:-5435}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SESSION_DB_USER:-postgres} -d ${SESSION_DB_NAME:-netflix_sessions}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks: [netflix_net]
+
+  postgres_sessions_replication_setup:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "/scripts/grant_replication.sh"]
+    environment:
+      POSTGRES_DB: ${SESSION_DB_NAME:-netflix_sessions}
+      POSTGRES_USER: ${SESSION_DB_USER:-postgres}
+      PGPASSWORD: ${SESSION_DB_PASSWORD:-postgres}
+      PRIMARY_HOST: postgres_sessions
+      REPLICATION_USER: ${SESSION_DB_REPLICATION_USER:-netflix_sessions_replicator}
+      REPLICATION_PASSWORD: ${SESSION_DB_REPLICATION_PASSWORD:-${SESSION_DB_PASSWORD:-postgres}}
+    volumes:
+      - ./docker/grant_replication.sh:/scripts/grant_replication.sh:ro
+    depends_on:
+      postgres_sessions: {condition: service_healthy}
+    networks: [netflix_net]
+
+  postgres_sessions_replica:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/docker/postgres_replica_entrypoint.sh"]
+    environment:
+      POSTGRES_DB: ${SESSION_DB_NAME:-netflix_sessions}
+      POSTGRES_USER: ${SESSION_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${SESSION_DB_PASSWORD:-postgres}
+      PRIMARY_HOST: postgres_sessions
+      REPLICATION_USER: ${SESSION_DB_REPLICATION_USER:-netflix_sessions_replicator}
+      REPLICATION_PASSWORD: ${SESSION_DB_REPLICATION_PASSWORD:-${SESSION_DB_PASSWORD:-postgres}}
+    volumes:
+      - sessions_replica_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres_replica_entrypoint.sh:/docker/postgres_replica_entrypoint.sh:ro
+    ports: ["127.0.0.1:${SESSION_DB_REPLICA_HOST_PORT:-5445}:5432"]
+    depends_on:
+      postgres_sessions_replication_setup: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SESSION_DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    networks: [netflix_net]
+
+  movie_catalog_init:
+    build: {context: ., dockerfile: movie_catalog_microservice/Dockerfile}
+    command: ["sh", "docker/init_catalog.sh"]
+    environment:
+      DJANGO_ENV: ${DJANGO_ENV:-development}
+      DJANGO_SECRET_KEY: ${MOVIE_CATALOG_SECRET_KEY:-django-insecure-catalog-secret-key}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-django-insecure-jwt-signing-key-must-be-set}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      DB_NAME: ${MOVIE_DB_NAME:-netflix_movies}
+      DB_USER: ${MOVIE_DB_USER:-postgres}
+      DB_PASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+      DB_HOST: postgres_movies
+      DB_PORT: 5432
+    depends_on:
+      postgres_movies: {condition: service_healthy}
+    networks: [netflix_net]
+
+  movie_catalog_1: &movie_catalog
+    build: {context: ., dockerfile: movie_catalog_microservice/Dockerfile}
+    restart: unless-stopped
+    command: >-
+      sh -c "python movies/tcp_server.py & exec daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    environment: &movie_catalog_environment
+      DJANGO_ENV: ${DJANGO_ENV:-development}
+      DJANGO_SECRET_KEY: ${MOVIE_CATALOG_SECRET_KEY:-django-insecure-catalog-secret-key}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-django-insecure-jwt-signing-key-must-be-set}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
+      DB_NAME: ${MOVIE_DB_NAME:-netflix_movies}
+      DB_USER: ${MOVIE_DB_USER:-postgres}
+      DB_PASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+      DB_HOST: postgres_movies
+      DB_PORT: 5432
+      MOVIE_CATALOG_TCP_PORT: 9002
+      MOVIE_CATALOG_TCP_BIND_HOST: 0.0.0.0
+      MOVIE_CATALOG_TCP_TIMEOUT_SECONDS: ${MOVIE_CATALOG_TCP_TIMEOUT_SECONDS:-2}
+    depends_on:
+      movie_catalog_init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=2); socket.create_connection(('127.0.0.1', 9002), timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [netflix_net]
+
+  movie_catalog_2:
+    <<: *movie_catalog
+    environment: *movie_catalog_environment
+
+  haproxy:
+    image: haproxy:3.2-alpine
+    restart: unless-stopped
+    ports:
+      - "${MOVIE_CATALOG_HOST_PORT:-8000}:8000"
+      - "${MOVIE_CATALOG_TCP_HOST_PORT:-9002}:9002"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      movie_catalog_1: {condition: service_healthy}
+      movie_catalog_2: {condition: service_healthy}
+    networks: [netflix_net]
+
+  streaming_session:
+    build: {context: ., dockerfile: streaming_session_microservice/Dockerfile}
+    restart: unless-stopped
+    command: ["sh", "docker/init_session.sh"]
+    environment:
+      DJANGO_ENV: ${DJANGO_ENV:-development}
+      DJANGO_SECRET_KEY: ${STREAMING_SESSION_SECRET_KEY:-django-insecure-session-secret-key}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-django-insecure-jwt-signing-key-must-be-set}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-*}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
+      DB_NAME: ${SESSION_DB_NAME:-netflix_sessions}
+      DB_USER: ${SESSION_DB_USER:-postgres}
+      DB_PASSWORD: ${SESSION_DB_PASSWORD:-postgres}
+      DB_HOST: postgres_sessions
+      DB_PORT: 5432
+      MOVIE_CATALOG_TCP_HOST: haproxy
+      MOVIE_CATALOG_TCP_PORT: 9002
+      MOVIE_CATALOG_TCP_TIMEOUT_SECONDS: ${MOVIE_CATALOG_TCP_TIMEOUT_SECONDS:-2}
+      MOVIE_CATALOG_TCP_MAX_RETRIES: ${MOVIE_CATALOG_TCP_MAX_RETRIES:-3}
+      MOVIE_CATALOG_TCP_RETRY_BACKOFF_SECONDS: ${MOVIE_CATALOG_TCP_RETRY_BACKOFF_SECONDS:-0.25}
+      MOVIE_CATALOG_TCP_FAILURE_THRESHOLD: ${MOVIE_CATALOG_TCP_FAILURE_THRESHOLD:-5}
+      MOVIE_CATALOG_TCP_RECOVERY_TIMEOUT_SECONDS: ${MOVIE_CATALOG_TCP_RECOVERY_TIMEOUT_SECONDS:-30}
+      MOVIE_CATALOG_TCP_HALF_OPEN_LIMIT: ${MOVIE_CATALOG_TCP_HALF_OPEN_LIMIT:-1}
+    ports: ["${STREAMING_SESSION_HOST_PORT:-8001}:8001"]
+    depends_on:
+      postgres_sessions: {condition: service_healthy}
+      postgres_sessions_replica: {condition: service_healthy}
+      haproxy: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [netflix_net]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_MOVIE_CATALOG_WS_URL: ${VITE_MOVIE_CATALOG_WS_URL:-ws://localhost:8000/ws/movies/}
+        VITE_STREAMING_SESSION_WS_URL: ${VITE_STREAMING_SESSION_WS_URL:-ws://localhost:8001/ws/sessions/}
+        VITE_STREAMING_SESSION_HTTP_URL: ${VITE_STREAMING_SESSION_HTTP_URL:-http://localhost:8001}
+    restart: unless-stopped
+    ports: ["${FRONTEND_HOST_PORT:-3000}:80"]
+    depends_on:
+      haproxy: {condition: service_started}
+      streaming_session: {condition: service_healthy}
+    networks: [netflix_net]
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["backup"]
+    entrypoint: ["/bin/sh", "/scripts/backup_databases.sh"]
+    environment:
+      MOVIE_DB_NAME: ${MOVIE_DB_NAME:-netflix_movies}
+      MOVIE_DB_USER: ${MOVIE_DB_USER:-postgres}
+      MOVIE_DB_PASSWORD: ${MOVIE_DB_PASSWORD:-postgres}
+      SESSION_DB_NAME: ${SESSION_DB_NAME:-netflix_sessions}
+      SESSION_DB_USER: ${SESSION_DB_USER:-postgres}
+      SESSION_DB_PASSWORD: ${SESSION_DB_PASSWORD:-postgres}
+    volumes:
+      - ./docker/backup_databases.sh:/scripts/backup_databases.sh:ro
+      - postgres_backups:/backups
+    depends_on:
+      postgres_movies: {condition: service_healthy}
+      postgres_sessions: {condition: service_healthy}
+    networks: [netflix_net]
+
+volumes:
+  movies_db_data:
+  sessions_db_data:
+  # New replica volume names preserve any pre-existing replica data from older
+  # configurations while bootstrapping replicas for this layout.
+  movies_replica_pgdata:
+  sessions_replica_pgdata:
+  postgres_backups:
+
+networks:
+  netflix_net:
+    driver: bridge

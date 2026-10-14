@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1045" width="1700" height="1045">
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, "Liberation Sans", sans-serif; fill: #222; }
+      .title { font-size: 28px; font-weight: bold; text-anchor: middle; }
+      .h  { font-size: 18px; font-weight: bold; text-anchor: middle; }
+      .b  { font-size: 15px; text-anchor: middle; }
+      .l  { font-size: 14px; text-anchor: middle; fill: #333; }
+      .nt { font-size: 14px; font-weight: bold; }
+      .n  { font-size: 14px; }
+      .band { font-size: 13px; font-weight: bold; text-anchor: end; fill: #666; letter-spacing: 1px; }
+      .app { fill: #dce9f7; stroke: #4a6fa5; stroke-width: 1.3; }
+      .db  { fill: #dff0d8; stroke: #5b8c4a; stroke-width: 1.3; }
+      .bk  { fill: #fde5c8; stroke: #c9822b; stroke-width: 1.3; }
+      .layer { fill: #fafafa; stroke: #b5b5b5; stroke-width: 1; }
+      .note { fill: #fffef6; stroke: #999; stroke-width: 1; stroke-dasharray: 4 3; }
+      .arr { fill: none; stroke-width: 2.2; }
+    </style>
+    <marker id="mBlue"   viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f6feb"/></marker>
+    <marker id="mPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#7b3fc4"/></marker>
+    <marker id="mRed"    viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d32f2f"/></marker>
+    <marker id="mGray"   viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker>
+    <marker id="mGreen"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2e8b3a"/></marker>
+    <marker id="mOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#e67e22"/></marker>
+  </defs>
+
+  <rect width="1700" height="1045" fill="#ffffff"/>
+  <text class="title" x="850" y="44">Netflix Distributed Streaming Platform — System Architecture</text>
+
+  <!-- Layer bands -->
+  <rect class="layer" x="20" y="70"  width="1660" height="120" rx="4"/>
+  <rect class="layer" x="20" y="210" width="1660" height="335" rx="4"/>
+  <rect class="layer" x="20" y="565" width="1660" height="220" rx="4"/>
+  <rect class="layer" x="20" y="830" width="1660" height="115" rx="4"/>
+  <text class="band" x="1664" y="92">LAYER 1 — PRESENTATION</text>
+  <text class="band" x="1664" y="232">LAYER 2 — APPLICATION &amp; ROUTING</text>
+  <text class="band" x="1664" y="587">LAYER 3 — DATABASE INFRASTRUCTURE</text>
+  <text class="band" x="1664" y="852">LAYER 4 — BACKUP INFRASTRUCTURE</text>
+
+  <!-- Layer 1 -->
+  <rect x="110" y="105" width="220" height="58" rx="4" fill="#f1f1f1" stroke="#888" stroke-width="1.3"/>
+  <text class="h" x="220" y="140">Browser</text>
+  <rect class="app" x="590" y="98" width="520" height="72" rx="4"/>
+  <text class="h" x="850" y="127">React Frontend + Nginx</text>
+  <text class="b" x="850" y="152">Port 3000</text>
+
+  <!-- Layer 2 -->
+  <rect class="app" x="100" y="325" width="340" height="90" rx="4"/>
+  <text class="h" x="270" y="359">Streaming Session Service</text>
+  <text class="b" x="270" y="383">Port 8001</text>
+
+  <rect class="app" x="690" y="325" width="320" height="90" rx="4"/>
+  <text class="h" x="850" y="359">HAProxy</text>
+  <text class="b" x="850" y="383">8000 HTTP/WS · 9002 TCP</text>
+
+  <rect x="1230" y="268" width="420" height="172" rx="4" fill="#f5f9fd" stroke="#4a6fa5" stroke-width="1.3"/>
+  <text class="h" x="1440" y="292">Movie Catalog Service</text>
+  <rect class="app" x="1255" y="308" width="370" height="50" rx="4"/>
+  <text class="h" x="1440" y="339" style="font-size:16px">movie_catalog_1</text>
+  <rect class="app" x="1255" y="372" width="370" height="50" rx="4"/>
+  <text class="h" x="1440" y="403" style="font-size:16px">movie_catalog_2</text>
+
+  <!-- Annotations (Layer 2) -->
+  <rect class="note" x="250" y="435" width="300" height="92" rx="4"/>
+  <text class="nt" x="262" y="455">TCP Resilience</text>
+  <text class="n" x="262" y="474">• Timeouts + bounded retries</text>
+  <text class="n" x="262" y="492">• Exponential backoff + jitter</text>
+  <text class="n" x="262" y="510">• Circuit breaker + recovery probe</text>
+
+  <rect class="note" x="640" y="435" width="330" height="92" rx="4"/>
+  <text class="nt" x="652" y="455">Catalog Load Balancing</text>
+  <text class="n" x="652" y="474">• Two instances behind HAProxy</text>
+  <text class="n" x="652" y="492">• Health checks</text>
+  <text class="n" x="652" y="510">• Unhealthy removed, healthy rejoin</text>
+
+  <!-- Layer 3 : Sessions DB -->
+  <rect x="60" y="605" width="590" height="170" rx="4" fill="#f6fbf4" stroke="#5b8c4a" stroke-width="1.3"/>
+  <text class="h" x="355" y="629">Sessions Database</text>
+  <rect class="db" x="90" y="655" width="210" height="80" rx="4"/>
+  <text class="h" x="195" y="692" style="font-size:17px">PostgreSQL Primary</text>
+  <text class="b" x="195" y="715">read / write</text>
+  <rect class="db" x="420" y="655" width="210" height="80" rx="4"/>
+  <text class="h" x="525" y="692" style="font-size:17px">PostgreSQL Replica</text>
+  <text class="b" x="525" y="715">read-only</text>
+
+  <!-- Layer 3 : Movies DB -->
+  <rect x="1090" y="605" width="570" height="170" rx="4" fill="#f6fbf4" stroke="#5b8c4a" stroke-width="1.3"/>
+  <text class="h" x="1375" y="629">Movies Database</text>
+  <rect class="db" x="1110" y="655" width="210" height="80" rx="4"/>
+  <text class="h" x="1215" y="692" style="font-size:17px">PostgreSQL Primary</text>
+  <text class="b" x="1215" y="715">read / write</text>
+  <rect class="db" x="1430" y="655" width="210" height="80" rx="4"/>
+  <text class="h" x="1535" y="692" style="font-size:17px">PostgreSQL Replica</text>
+  <text class="b" x="1535" y="715">read-only</text>
+
+  <!-- Layer 3 center annotations -->
+  <rect class="note" x="670" y="608" width="400" height="92" rx="4"/>
+  <text class="nt" x="682" y="628">Database Replication and Backup</text>
+  <text class="n" x="682" y="647">• Async WAL streaming</text>
+  <text class="n" x="682" y="665">• Read-only replicas</text>
+  <text class="n" x="682" y="683">• On-demand logical backups</text>
+
+  <rect x="665" y="712" width="410" height="42" rx="4" fill="#fff5f5" stroke="#b33" stroke-width="1.3"/>
+  <text class="n" x="870" y="738" style="font-size:13.5px;text-anchor:middle">Automatic database failover is not implemented.</text>
+
+  <!-- Layer 4 -->
+  <rect class="bk" x="560" y="855" width="420" height="70" rx="4"/>
+  <text class="h" x="770" y="884">On-Demand Backup Job</text>
+  <text class="b" x="770" y="908">Runs only when invoked</text>
+
+  <rect class="bk" x="1180" y="860" width="400" height="60" rx="4"/>
+  <text class="h" x="1380" y="896">Persistent Backup Volume</text>
+
+  <!-- Arrows -->
+  <path class="arr" stroke="#1f6feb" marker-end="url(#mBlue)" d="M330,134 L590,134"/>
+  <text class="l" x="460" y="125">HTTP</text>
+
+  <path class="arr" stroke="#7b3fc4" marker-end="url(#mPurple)" d="M850,170 L850,325"/>
+  <text class="l" x="862" y="250" style="text-anchor:start">WebSocket</text>
+
+  <path class="arr" stroke="#1f6feb" marker-end="url(#mBlue)" d="M650,170 L650,244 L270,244 L270,325"/>
+  <text class="l" x="460" y="236">HTTP login</text>
+
+  <path class="arr" stroke="#7b3fc4" marker-end="url(#mPurple)" d="M710,170 L710,282 L390,282 L390,325"/>
+  <text class="l" x="550" y="274">WebSocket</text>
+
+  <path class="arr" stroke="#d32f2f" marker-end="url(#mRed)" d="M440,370 L690,370"/>
+  <text class="l" x="565" y="361">Raw TCP</text>
+
+  <path class="arr" stroke="#7b3fc4" marker-end="url(#mPurple)" d="M1010,333 L1230,333"/>
+  <text class="l" x="1120" y="324">:8000 WebSocket</text>
+  <path class="arr" stroke="#d32f2f" marker-end="url(#mRed)" d="M1010,397 L1230,397"/>
+  <text class="l" x="1120" y="388">:9002 Raw TCP</text>
+
+  <path class="arr" stroke="#666" marker-end="url(#mGray)" d="M1250,440 L1250,655"/>
+  <text class="l" x="1262" y="500" style="text-anchor:start">DB connection</text>
+  <path class="arr" stroke="#666" marker-end="url(#mGray)" d="M195,415 L195,655"/>
+  <text class="l" x="183" y="500" style="text-anchor:end">DB connection</text>
+
+  <path class="arr" stroke="#2e8b3a" marker-end="url(#mGreen)" d="M300,695 L420,695"/>
+  <text class="l" x="360" y="684">Async WAL</text>
+  <path class="arr" stroke="#2e8b3a" marker-end="url(#mGreen)" d="M1320,695 L1430,695"/>
+  <text class="l" x="1375" y="684">Async WAL</text>
+
+  <path class="arr" stroke="#e67e22" stroke-dasharray="7 5" marker-end="url(#mOrange)" d="M640,855 L640,812 L250,812 L250,735"/>
+  <text class="l" x="445" y="805">Logical backup</text>
+  <path class="arr" stroke="#e67e22" stroke-dasharray="7 5" marker-end="url(#mOrange)" d="M900,855 L900,812 L1215,812 L1215,735"/>
+  <text class="l" x="1057" y="805">Logical backup</text>
+  <path class="arr" stroke="#e67e22" stroke-dasharray="7 5" marker-end="url(#mOrange)" d="M980,890 L1180,890"/>
+  <text class="l" x="1080" y="881">Writes files</text>
+
+  <!-- Legend -->
+  <rect x="20" y="965" width="1660" height="56" rx="4" fill="#ffffff" stroke="#b5b5b5" stroke-width="1"/>
+  <path class="arr" stroke="#1f6feb" marker-end="url(#mBlue)" d="M50,993 L100,993"/>
+  <text class="n" x="110" y="998">HTTP</text>
+  <path class="arr" stroke="#7b3fc4" marker-end="url(#mPurple)" d="M320,993 L370,993"/>
+  <text class="n" x="380" y="998">WebSocket</text>
+  <path class="arr" stroke="#d32f2f" marker-end="url(#mRed)" d="M590,993 L640,993"/>
+  <text class="n" x="650" y="998">Raw TCP</text>
+  <path class="arr" stroke="#666" marker-end="url(#mGray)" d="M860,993 L910,993"/>
+  <text class="n" x="920" y="998">Database connection</text>
+  <path class="arr" stroke="#2e8b3a" marker-end="url(#mGreen)" d="M1130,993 L1180,993"/>
+  <text class="n" x="1190" y="998">WAL replication</text>
+  <path class="arr" stroke="#e67e22" stroke-dasharray="7 5" marker-end="url(#mOrange)" d="M1400,993 L1450,993"/>
+  <text class="n" x="1460" y="998">Backup flow</text>
+</svg>

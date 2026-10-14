@@ -1,0 +1,375 @@
+NETFLIX DISTRIBUTED STREAMING PLATFORM
+USAGE MANUAL
+
+This guide is a hands-on walkthrough for a first-time user. It shows how to
+start the application, use its main features, exercise the distributed
+services, run the existing tests, and check database replication and backups.
+
+Use a terminal opened in the project folder (the folder containing
+docker-compose.yml). Commands are written for macOS/Linux or WSL using Bash
+or zsh. Keep Docker Desktop or Docker Engine running throughout.
+
+QUICK MAP
+---------
+Browser application:       http://localhost:3000
+Catalog HTTP             http://localhost:8000
+Catalog WebSocket         ws://localhost:8000/ws/movies/
+Catalog TCP               localhost:9002
+Streaming Session HTTP    http://localhost:8001
+Session WebSocket         ws://localhost:8001/ws/sessions/
+Movies database primary  localhost:5434 (local administration only)
+Movies database replica  localhost:5444 (read-only)
+Sessions database primary localhost:5435 (local administration only)
+Sessions database replica localhost:5445 (read-only)
+
+The browser uses WebSockets for Catalog browsing and streaming sessions. The
+Streaming Session service calls the Catalog over newline-framed TCP to fetch
+movie metadata. Services communicate over a private Docker network. HAProxy
+routes Catalog HTTP/WebSocket and TCP traffic to two Catalog instances.
+
+1. START THE APPLICATION
+------------------------
+From the project folder, build and start the stack:
+
+    docker compose up --build -d
+
+The first build may take several minutes. Check container state:
+
+    docker compose ps -a
+
+Wait for the main services to show healthy or running. The one-shot setup
+services may show Exited (0); that means setup completed. If a service is still
+starting, wait a little and run `docker compose ps -a` again. View logs for a
+service that is unhealthy:
+
+    docker compose logs --tail=100 <service-name>
+
+Open the application:
+
+    http://localhost:3000
+
+Do not run `docker compose down -v`: `-v` deletes persistent database and
+backup volumes. A normal `docker compose down` keeps them.
+
+2. CREATE AN ACCOUNT AND USE THE APPLICATION
+--------------------------------------------
+The Login page has no sign-up button. Create your own account once with this
+command. Replace `myuser` with a new username and replace the example password
+with a long, unique password. The application rejects weak passwords. Do not
+share your real password or save it in this manual.
+
+    curl -i -X POST http://localhost:8001/api/register/ \
+      -H 'Content-Type: application/json' \
+      -d '{"username":"myuser","password":"mypassword123"}'
+
+HTTP 201 means registration succeeded. If the username is taken, choose a
+different one. If you see a connection error, return to section 1 and check
+that `streaming_session` is running.
+
+In the browser, open http://localhost:3000. First try logging in with an
+incorrect password once and confirm that login is rejected. Then log in with
+the correct account. Try the main application flow:
+
+1. Select Browse Movies.
+2. Search by title or choose a genre filter. Select a movie card to open its
+details, including its description, genre, duration, and release date.
+3. Select Watch. The video player opens and the service creates or resumes
+   your session. Press Play in the video controls to begin playback; playback
+   does not automatically start in every browser.
+4. Play the video briefly, then select the page's Back to Movie button. This
+   saves the playback position and pauses the session.
+5. Return to Continue Watching. The movie should be listed with progress.
+   Select it and confirm playback resumes around the saved position.
+6. To test completion, open a short video and let it finish. Return to Browse
+   Movies and open the same title again. It should create a new session so you
+   can watch again.
+7. Select Logout when finished.
+
+A movie's video file must exist in the frontend's `public/videos` folder and
+be served by the frontend. The sample catalog is seeded during initialization.
+
+Optional: check that the frontend can serve a video byte range. HTTP 206 is
+expected. This sample file is present in the project:
+
+    curl -sS -o /dev/null -w 'HTTP %{http_code}; %{size_download} bytes\n' \
+      --range 0-1023 http://localhost:3000/videos/100195-video-720.mp4
+
+3. CHECK SERVICE HEALTH
+-----------------------
+Check the application health endpoints:
+
+    curl -i http://localhost:8000/health/
+    curl -i http://localhost:8001/health/
+
+Both should return HTTP 200 with a JSON status of `ok`. Catalog health
+includes the instance identifier. A Catalog health check also verifies that
+its Movies database is reachable.
+
+4. TEST CATALOG LOAD BALANCING AND RECOVERY
+-------------------------------------------
+Check the instances and HAProxy:
+
+    docker compose ps movie_catalog_1 movie_catalog_2 haproxy
+
+Send repeated requests through HAProxy:
+
+    for i in {1..10}; do curl -fsS http://localhost:8000/health/; echo; done
+
+Each response should be successful. When both Catalog instances are healthy,
+the responses should show both instance identifiers. HAProxy checks Catalog
+HTTP health at `/health/`; its TCP check only checks that the TCP port accepts
+a connection.
+
+Now stop one Catalog instance and confirm the other keeps serving requests:
+
+    docker compose stop movie_catalog_1
+    for i in {1..10}; do curl -fsS -w ' HTTP %{http_code}\n' http://localhost:8000/health/; done
+
+Each request should return HTTP 200 from the remaining healthy instance.
+HAProxy checks backends every two seconds and requires two failed checks to
+mark a backend down. Wait about five seconds after stopping the instance
+before judging the results; retry any request made during health-check
+convergence.
+Restart the stopped instance immediately after this check:
+
+    docker compose start movie_catalog_1
+    docker compose ps movie_catalog_1 movie_catalog_2 haproxy
+
+Wait until `movie_catalog_1` is healthy, then repeat the ten health requests.
+Allow several more seconds for HAProxy's two successful rise checks;
+responses should then include both instance identifiers. If you interrupt
+this procedure, restart the stopped instance with
+`docker compose start movie_catalog_1`.
+
+To check actual Catalog content and TCP service availability while one
+instance is stopped, run these before restarting it. The TCP health operation
+should still return success through the remaining instance:
+
+    curl -fsS http://localhost:8000/api/movies/
+    printf '{"operation":"health"}\n' | nc -w 3 localhost 9002
+
+5. TEST THE CATALOG TCP SOCKET
+------------------------------
+Each TCP request is a JSON object followed by a newline. The response is also
+newline-terminated JSON. Use `printf` so the request is correctly framed.
+
+Check the TCP health operation:
+
+    printf '{"operation":"health"}\n' | nc -w 3 localhost 9002
+
+Expect a JSON response with `"status":"success"` and
+`"operation":"health"`.
+
+To request a movie, first list catalog records and note an existing `id`:
+
+    curl -fsS http://localhost:8000/api/movies/
+
+Replace `MOVIE_ID` below with that numeric id:
+
+    printf '{"operation":"get_movie","movie_id":MOVIE_ID}\n' | nc -w 3 localhost 9002
+
+A valid id returns movie data. An unknown id returns `not_found`, which is a
+normal response. Do not send a partial request without a newline. HAProxy and
+container health checks make empty TCP connections; the Catalog closes those
+without treating them as malformed requests.
+
+6. TEST TCP CLIENT RESILIENCE
+-----------------------------
+The Streaming Session service uses TCP to get Catalog metadata when it creates
+a session. Its client has connection and response timeouts, bounded retries
+with capped backoff, and a circuit breaker that transitions through
+half-open recovery. Run the existing suite, which includes mocked timeout,
+retry, circuit-breaker, framing, and listener-recovery cases:
+
+    docker compose exec -T streaming_session python manage.py test streaming_sessions
+
+A passing test command ends with `OK`. The suite runs inside the existing
+container and does not reset the project database volumes.
+
+For a live availability check, use the Catalog test in section 4: the TCP
+HAProxy backend should keep metadata available through the other healthy
+Catalog instance. The automated suite verifies client retry and circuit recovery
+with controlled failures. The project does not provide a separate dashboard
+for circuit state.
+
+7. VERIFY POSTGRESQL REPLICATION
+--------------------------------
+There are two independent primary/replica pairs. Run these checks to confirm
+each primary has a streaming replica and each replica is in recovery mode:
+
+    docker compose exec postgres_movies sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select application_name, state, sync_state from pg_stat_replication;"'
+    docker compose exec postgres_movies_replica sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select pg_is_in_recovery();"'
+    docker compose exec postgres_sessions sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select application_name, state, sync_state from pg_stat_replication;"'
+    docker compose exec postgres_sessions_replica sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select pg_is_in_recovery();"'
+
+Each primary should show a `streaming` connection. Each replica query should
+return `t` (true). Replication is asynchronous, so a change may take a short
+time to appear on the replica.
+
+To prove data is copied, create a temporary probe table on each primary, read
+its row on the replica, then remove the table from the primary. These commands
+use a unique table name and only add the value 42. Run each block in the same
+terminal so the shell variable is retained.
+
+Movies database probe:
+
+    probe_movies="usage_probe_movies_$(date +%s)_$$"
+    docker compose exec -T -e PROBE_TABLE="$probe_movies" postgres_movies sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE TABLE ${PROBE_TABLE} (value integer)" -c "INSERT INTO ${PROBE_TABLE} VALUES (42)"'
+    docker compose exec -T -e PROBE_TABLE="$probe_movies" postgres_movies_replica sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ${PROBE_TABLE};"'
+    docker compose exec -T -e PROBE_TABLE="$probe_movies" postgres_movies sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP TABLE ${PROBE_TABLE};"'
+
+Sessions database probe:
+
+    probe_sessions="usage_probe_sessions_$(date +%s)_$$"
+    docker compose exec -T -e PROBE_TABLE="$probe_sessions" postgres_sessions sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE TABLE ${PROBE_TABLE} (value integer)" -c "INSERT INTO ${PROBE_TABLE} VALUES (42)"'
+    docker compose exec -T -e PROBE_TABLE="$probe_sessions" postgres_sessions_replica sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ${PROBE_TABLE};"'
+    docker compose exec -T -e PROBE_TABLE="$probe_sessions" postgres_sessions sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "DROP TABLE ${PROBE_TABLE};"'
+
+Wait briefly for replication if the SELECT runs too quickly. Each SELECT
+should return 42. The DROP command removes the temporary test table from the
+primary and it will replicate to the replica. If interrupted after creating a
+table, run the matching DROP command before repeating the test.
+
+Confirm that a replica is read-only. This command is expected to fail with a
+read-only transaction error; it does not create a table:
+
+    docker compose exec postgres_movies_replica sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "BEGIN; CREATE TABLE write_must_fail (value integer); ROLLBACK;"'
+
+Repeat with `postgres_sessions_replica` if desired. Never write application
+data to a replica or promote one as part of this check. If the replica
+unexpectedly accepts the CREATE, the surrounding transaction rolls it back;
+otherwise PostgreSQL returns the expected read-only transaction error.
+
+8. CREATE AND VERIFY DATABASE BACKUPS
+-------------------------------------
+Create a fresh compressed backup of each primary:
+
+    docker compose --profile backup run --rm backup
+
+The command reports two dump filenames. List backups stored in the persistent
+backup volume:
+
+    docker compose --profile backup run --rm --entrypoint sh backup -c 'ls -lh /backups'
+
+To restore-check the latest Movies backup without touching the application
+database, run this command. It creates a uniquely named temporary database,
+restores the dump there, compares the movie row count, then removes the
+temporary database automatically:
+
+    docker compose --profile backup run --rm --entrypoint sh backup -c '
+    set -eu
+    db="usage_restore_movies_$(date -u +%Y%m%d%H%M%S)_$$"
+    created=0
+    cleanup() { if [ "$created" = 1 ]; then dropdb -h postgres_movies -U "$MOVIE_DB_USER" --if-exists "$db" >/dev/null; fi; }
+    trap cleanup EXIT
+    export PGPASSWORD="$MOVIE_DB_PASSWORD"
+    dump=$(ls -1t /backups/movies-*.dump | head -n 1)
+    createdb -h postgres_movies -U "$MOVIE_DB_USER" "$db"
+    created=1
+    pg_restore -h postgres_movies -U "$MOVIE_DB_USER" -d "$db" --no-owner --no-privileges "$dump"
+    expected=$(psql -h postgres_movies -U "$MOVIE_DB_USER" -d "$MOVIE_DB_NAME" -Atc "select count(*) from movies_movie")
+    actual=$(psql -h postgres_movies -U "$MOVIE_DB_USER" -d "$db" -Atc "select count(*) from movies_movie")
+    test "$expected" = "$actual"
+    echo "Movies restore verified: $actual rows"
+    '
+
+Run the matching restore check for the Sessions backup:
+
+    docker compose --profile backup run --rm --entrypoint sh backup -c '
+    set -eu
+    db="usage_restore_sessions_$(date -u +%Y%m%d%H%M%S)_$$"
+    created=0
+    cleanup() { if [ "$created" = 1 ]; then dropdb -h postgres_sessions -U "$SESSION_DB_USER" --if-exists "$db" >/dev/null; fi; }
+    trap cleanup EXIT
+    export PGPASSWORD="$SESSION_DB_PASSWORD"
+    dump=$(ls -1t /backups/sessions-*.dump | head -n 1)
+    createdb -h postgres_sessions -U "$SESSION_DB_USER" "$db"
+    created=1
+    pg_restore -h postgres_sessions -U "$SESSION_DB_USER" -d "$db" --no-owner --no-privileges "$dump"
+    expected=$(psql -h postgres_sessions -U "$SESSION_DB_USER" -d "$SESSION_DB_NAME" -Atc "select count(*) from streaming_sessions_session")
+    actual=$(psql -h postgres_sessions -U "$SESSION_DB_USER" -d "$db" -Atc "select count(*) from streaming_sessions_session")
+    test "$expected" = "$actual"
+    echo "Sessions restore verified: $actual rows"
+    '
+
+Each command should print that the restore was verified. The cleanup trap
+removes only its temporary database, including when restore verification
+fails. Never substitute a live database name for the generated temporary
+name. Automatic database failover is not implemented.
+
+9. RUN THE EXISTING AUTOMATED TESTS
+-----------------------------------
+Run each existing service suite inside its running application container:
+
+    docker compose exec -T movie_catalog_1 python manage.py test movies
+    docker compose exec -T streaming_session python manage.py test streaming_sessions
+
+Wait for each command to finish. `OK` means the suite passed; a traceback or
+`FAILED` means it did not. The Catalog suite covers its HTTP endpoints and
+TCP request handling. The Streaming Session suite covers TCP timeout/retry/
+circuit behavior and session authentication, ownership, progress, and
+completion. Django uses a temporary test database; these commands do not reset
+the application's persistent database volumes. They do not replace a browser
+check of login and playback.
+
+10. STOP AND RESTART SAFELY
+---------------------------
+Stop containers and retain accounts, movies, sessions, replicas, and backups:
+
+    docker compose down
+
+Start the application again later:
+
+    docker compose up -d
+
+Check its status:
+
+    docker compose ps
+
+Do not add `-v` to the stop command. Removing volumes can permanently delete
+project data and backup files.
+
+11. TROUBLESHOOTING
+-------------------
+Docker command cannot connect to daemon
+  Open Docker Desktop or start Docker Engine. Check `docker info`, then retry.
+
+A service is unhealthy or the page does not load
+  Run `docker compose ps` and `docker compose logs --tail=100 <service-name>`.
+  Confirm the databases, HAProxy, Streaming Session service, and frontend are
+  running. Wait for startup health checks to finish.
+
+A browser port is already in use
+  Check `docker compose ps` and `docker ps`. Do not stop unknown containers.
+  The configured host ports can be changed in the existing `.env` if needed.
+
+Login fails
+  Confirm the account was created successfully and use the same username and
+  password. Choose a new username if registration reported it was taken.
+
+Movie list, details, or playback fails
+  Check both health URLs from section 3, then inspect Catalog and session
+  logs with `docker compose logs --tail=100 movie_catalog_1 movie_catalog_2
+  streaming_session`. Check that the movie's video file exists under
+  `frontend/public/videos`.
+
+The Catalog TCP request is rejected
+  Send one JSON object ending in a newline, as shown in section 5. Use a real
+  movie ID from the Catalog response.
+
+A replica does not show a new row immediately
+  Replication is asynchronous. Check primary `pg_stat_replication`, wait a
+  few seconds, and run the replica SELECT again. Do not write to the replica.
+
+A backup restore check fails
+  Confirm that a fresh backup was created and the databases are healthy. The
+  command prints an error if the latest dump is missing, restoration fails,
+  or row counts differ. The temporary database cleanup runs automatically.
+
+Browser session or WebSocket calls fail after being idle
+  Log out and log in again to obtain a fresh access token. Never share the
+  token, passwords, or contents of `.env` in screenshots or support messages.
+
+This project is configured for local development. Database replication is
+asynchronous, replicas are read-only, and automatic database failover is not
+implemented.

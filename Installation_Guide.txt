@@ -1,0 +1,158 @@
+NETFLIX DISTRIBUTED STREAMING PLATFORM
+INSTALLATION GUIDE FOR A NEW COMPUTER
+
+
+1. GET THE PROJECT
+------------------
+
+Download the complete project folder from the project repository or from the
+ZIP file provided to you. If you download a ZIP, extract it first.
+
+Keep the project files together. Open the extracted project folder and check
+that it contains docker-compose.yml. You will run the commands below from
+this folder.
+
+
+2. INSTALL DOCKER
+-----------------
+
+Docker runs the frontend, backend services, and databases for you. You do
+not need to install those parts separately, or install Python, Node.js, or
+PostgreSQL on your computer.
+
+macOS
+  Install and open Docker Desktop:
+  https://docs.docker.com/desktop/setup/install/mac-install/
+
+Windows
+  Install Docker Desktop and complete its WSL 2 setup if prompted:
+  https://docs.docker.com/desktop/setup/install/windows-install/
+  Use PowerShell or a WSL terminal for the commands in this guide.
+
+Linux
+  Install Docker Engine and the Docker Compose plugin for your Linux
+  distribution:
+  https://docs.docker.com/engine/install/
+  https://docs.docker.com/compose/install/linux/
+  Make sure the Docker service is running. Follow Docker's post-installation
+  instructions if your account needs permission to run Docker commands.
+
+On macOS and Windows, leave Docker Desktop open. On Linux, make sure Docker
+Engine is running. Open a terminal and check that Docker and Compose work:
+
+    docker --version
+    docker compose version
+
+Both commands should display version information.
+
+PORT ALREADY IN USE?
+--------------------
+
+The project publishes host ports 3000 (frontend), 8000 (Catalog HTTP via
+HAProxy), 8001 (Streaming Session HTTP/WebSocket), and 9002 (Catalog TCP via
+HAProxy). PostgreSQL ports 5434, 5444, 5435, and 5445 are bound to localhost
+for local administration; backend services use the private Docker network.
+If Docker reports that a published host port is already allocated, another
+application or Docker container is using it. Do not stop containers you do
+not recognize.
+
+You can check running Docker containers and their ports with:
+
+    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+Make sure the ports are free before starting the project.
+
+3. START THE PROJECT
+--------------------
+
+Open a terminal in the project folder that contains docker-compose.yml.
+
+If you are not already in that folder, change to it. For example:
+
+macOS or Linux:
+
+    cd /path/to/the/extracted/project-folder
+
+Windows PowerShell:
+
+    cd "C:\path\to\the\extracted\project-folder"
+
+Replace the example path with the actual location of the project folder.
+Then build and start the project:
+
+    docker compose up --build -d
+
+The first start can take several minutes because Docker downloads the base
+images and builds the application. Docker also starts the databases and
+application services and applies the database migrations.
+
+Check that the services are running:
+
+    docker compose ps -a
+
+Wait until the services have started and both databases show healthy before
+creating an account.
+
+If a database is unhealthy, capture its logs before retrying:
+
+    docker compose logs --tail=100 postgres_movies postgres_sessions
+
+Do not remove volumes or run `docker compose down -v` to troubleshoot. The
+startup health checks allow a short initialization grace period; a persistent
+unhealthy status requires inspecting the database logs for the actual cause.
+
+
+4. CREATE AN ACCOUNT
+--------------------
+
+The application opens on its Login page and does not have a sign-up button.
+Create an account after the services have started. Use your own username and
+password. The configured Django password validators reject short, common,
+numeric-only, and username-similar passwords; choose a long, unique password.
+
+macOS, Linux, or Windows using WSL:
+
+    curl -X POST http://localhost:8001/api/register/ \
+      -H "Content-Type: application/json" \
+      -d '{"username":"user","password":"mypassword123"}'
+
+Windows PowerShell:
+
+    Invoke-RestMethod -Uri "http://localhost:8001/api/register/" -Method Post -ContentType "application/json" -Body '{"username":"myuser","password":"mypassword123"}'
+
+A successful response confirms the account was created. If the username is
+already taken, choose a different one. If the request cannot connect, check
+that the services are running with docker compose ps.
+
+
+5. OPEN THE APPLICATION
+-----------------------
+
+Open this address in a web browser:
+
+    http://localhost:3000
+
+Log in with the username and password you created.
+
+
+STOP OR RUN THE PROJECT AGAIN
+-----------------------------
+
+Stop the project but keep its database data:
+
+    docker compose down
+
+Start it again later from the project folder:
+
+    docker compose up -d
+
+To check status:
+
+    docker compose ps
+
+To view service logs if something does not start:
+
+    docker compose logs
+
+Do not use docker compose down -v for a normal stop. The -v option deletes
+the database volumes and can permanently remove accounts and other data.
